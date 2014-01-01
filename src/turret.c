@@ -83,7 +83,6 @@ void get_up_vector(struct robot *robot, struct vect *result)
 	result->y = raw.y / normal;
 	result->z = raw.z / normal;
 }
-	
 
 void rotate_on_camera(struct turret *turret, struct vect *result,
 		struct vect* input)
@@ -216,37 +215,32 @@ void pointer(struct robot *robot)
 	target.y = 0;
 	target.z = -40;
 
-//	angle += .01;
-
-	if (angle > 2 * M_PI) angle = 0;
-
 	point_at_world(robot, &target);
 
-	struct vect local_point, local, output, diff;
-
-	local_point.x = 0;
-	local_point.y = -500;
-	local_point.z = 0;
-
-	rotate_on_camera(&robot->turret, &local, &local_point);
-
-	local_to_world(robot, &output, &local);
+	struct vect output;
 
 	get_up_vector(robot, &output);
 
 //	printf("%f, %f, %f\n", output.x, output.y, output.z);
 
-	robot->turret.roll = atan2f(output.x, output.y);
-
-	struct vect cam_up, up;
+	struct vect cam_up, up, look, cam_forward, product;
 
 	up.x = 0;
 	up.y = 0;
 	up.z = 1.0;
 
+	cam_forward.x = 0;
+	cam_forward.y = -1;
+	cam_forward.z = 0;
+
 	rotate_vector(&cam_up, &up, &robot->turret.turret_rotation);
+	rotate_vector(&look, &cam_forward, &robot->turret.turret_rotation);
 
 	robot->turret.roll = acosf(dot(&cam_up, &output));
+
+	cross(&cam_up, &output, &product);
+
+	robot->turret.roll = asinf(product.x / look.x);
 
 	//printf("%f, %f, %f\n", local.x, local.y, local.z);
 	fprintf(stderr, "%f\n", robot->turret.roll);
