@@ -20,6 +20,13 @@ void *count_in(struct variable *var, struct string *string)
   return 0;
 }
 
+void remote(struct robot *robot)
+{
+	robot->rotational_velocity_setpoint = -robot->in_spin * robot->rotational_velocity_max;
+
+	robot->linear_velocity_setpoint = robot->in_speed * robot->linear_velocity_max;
+}
+
 void start_control_panel(struct robot *robot)
 {
 	struct server *server = new_server("Robot", 80);
@@ -374,13 +381,13 @@ void start_control_panel(struct robot *robot)
 
   page = new_page("/location.html", node, server);
 
-  var = new_variable(page, "pos_x", &robot->position.x, 4, count_in, count_out);
+  var = new_variable(page, "pos_x", &robot->position2.position.x, 4, count_in, count_out);
 
 	text = new_text("0", node);
 
 	text->contents->variable = var;
 
-  var = new_variable(page, "pos_y", &robot->position.y, 4, count_in, count_out);
+  var = new_variable(page, "pos_y", &robot->position2.position.y, 4, count_in, count_out);
 
 	text = new_text(",", node);
 
@@ -436,4 +443,49 @@ void start_control_panel(struct robot *robot)
 
 	text->contents->variable = var;
 
+	text = new_text(",", node);
+ 
+	var = new_variable(page, "tilt", &robot->position.tilt, 4, count_in, count_out);
+
+	text = new_text("0", node);
+
+	text->contents->variable = var;
+
+	text = new_text(",", node);
+ 
+	var = new_variable(page, "left_count", &robot->left_count, 4, count_in, count_out);
+
+	text = new_text("0", node);
+
+	text->contents->variable = var;
+
+	text = new_text(",", node);
+ 
+	var = new_variable(page, "right_count", &robot->right_count, 4, count_in, count_out);
+
+	text = new_text("0", node);
+
+	text->contents->variable = var;
+
+  node = new_node("graphs", NULL, NULL);
+
+  page = new_page("/graph_output.html", node, server);
+
+  var = new_variable(page, "tilt", &robot->position.traction_value, 4,
+		count_in, count_out);
+
+	text = new_text("0", node);
+
+	text->contents->variable = var;
+
+	text = new_text(",", node);
+
+  var = new_variable(page, "position", &robot->position.linear_count, 4,
+		count_in, count_out);
+
+	text = new_text("0", node);
+
+	text->contents->variable = var;
+
 }
+

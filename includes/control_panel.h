@@ -17,4 +17,6 @@
 
 void start_control_panel(struct robot *robot);
 
+void remote(struct robot *robot);
+
 #endif

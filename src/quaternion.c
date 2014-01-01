@@ -1,5 +1,7 @@
 #include "../includes/quaternion.h"
 #include <math.h>
+#include <stdio.h>
+#include "../includes/robot.h"
 
 int getQuaternion(struct quaternion *output, char *packet)
 {
@@ -16,6 +18,21 @@ int getQuaternion(struct quaternion *output, char *packet)
 	output->z = (float)temp[3] / 16384.0f;
 
 	return 0;
+}
+
+float get_tilt_angle(struct robot *robot)
+{
+	struct vect down, out;
+
+	down.x = 0;
+	down.y = 0;
+	down.z = -1;
+
+	rotate_vector(&out, &down, &robot->position2.orientation);
+
+	//printf("%f, %f, %f\n", out.x, out.y, out.z);
+
+	return atan2f(out.z, out.y);
 }
 
 float quaternion_to_tilt(struct quaternion *quat)
@@ -36,7 +53,9 @@ float quaternion_to_tilt(struct quaternion *quat)
 	if (ret > 1) ret = 1;
 	if (ret < -1) ret = -1;
 
-	ret = asinf(ret);
+	//printf("matrix:	%f, %f, %f\n", gravity.x, gravity.y, gravity.z);
+
+	ret = -atan2(-gravity.z, -gravity.y);
 
 	return ret;
 }
@@ -60,8 +79,8 @@ void quaternion_product(struct quaternion *result, struct quaternion * p,
 {
 	result->w = p->w * q->w - p->x * q->x - p->y * q->y - p->z * q->z;
 	result->x = p->w * q->x + p->x * q->w + p->y * q->z - p->z * q->y;
-	result->y = p->w * q->y - p->x * q->z + p->y * q->w + p->z * q->x;
-	result->z = p->w * q->z + p->x * q->y - p->y * q->x + p->z * q->w;
+	result->y = p->w * q->y + p->y * q->w + p->z * q->x - p->x * q->z;
+	result->z = p->w * q->z + p->z * q->w + p->x * q->y - p->y * q->x;
 }
 
 void get_conjugate(struct quaternion *result, struct quaternion *q)
@@ -70,4 +89,24 @@ void get_conjugate(struct quaternion *result, struct quaternion *q)
 	result->x = -q->x;
 	result->y = -q->y;
 	result->z = -q->z;
+}
+
+void rotate_vector(struct vect *out, struct vect *in, struct quaternion *r)
+{
+	struct quaternion temp, sum, res, inverse;
+
+	temp.x = in->x;
+	temp.y = in->y;
+	temp.z = in->z;
+	temp.w = 0;
+
+	get_conjugate(&inverse, r);
+
+	quaternion_product(&sum, r, &temp);
+
+	quaternion_product(&res, &sum, &inverse);
+
+	out->x = res.x;
+	out->y = res.y;
+	out->z = res.z;
 }

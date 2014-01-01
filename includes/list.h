@@ -10,12 +10,14 @@
  *     - #ifdef __KERNE__ and its #endif
  *     - all #include line
  *     - prefetch() and rcu related functions
- * 3. add macro offsetof() and container_of
+ * 3. add macro offseto() and container_of
  *
  * - kazutomo@mcs.anl.gov
  */
 #ifndef _LINUX_LIST_H
 #define _LINUX_LIST_H
+
+#include <stdlib.h>
 
 /**
  * @name from other kernel headers
@@ -25,7 +27,7 @@
 /**
  * Get offset of a member
  */
-#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#define offseto(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
 
 /**
  * Casts a member of a structure out to the containing structure
@@ -36,7 +38,7 @@
  */
 #define container_of(ptr, type, member) ({                      \
         const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
+        (type *)( (char *)__mptr - offseto(type,member) );})
 /*@}*/
 
 

@@ -19,13 +19,13 @@ void init_robot(struct robot *robot)
 
 	robot->encoder_handle = open(ENCODER_FILE, O_RDONLY);
 
-	robot->tilt_target = -0.15;
+	robot->tilt_target = -0.176;
 
-	robot->tilt_loop = new_pd(14, 55, 1, 0, 0, &robot->position.tilt, &robot->tilt_target); 
+	robot->tilt_loop = new_pd(14, 55, 1, 0, 0, &robot->position2.tilt, &robot->tilt_target); 
 
-	robot->linear_loop = new_pd(0.003, 0.0033, 60, 0, 0, &robot->position.linear_count, &robot->linear_target); 
+	robot->linear_loop = new_pd(0.003, 0.0033, 60, 0, 0, &robot->position2.distance_moved, &robot->linear_target); 
 
-	robot->spin_loop = new_pd(.8, 8, 1, 0, 0, &robot->position.incr_inertial_heading, &robot->rotational_target); 
+	robot->spin_loop = new_pd(.8, 8, 1, 0, 0, &robot->position2.heading, &robot->rotational_target); 
 
 	gpioInitialise();
 
@@ -71,6 +71,40 @@ void init_robot(struct robot *robot)
 	robot->turret.roll = 1380;
 
 	robot->turret.pitch = 900;
+
+	INIT_LIST_HEAD(&robot->task_list);
+}
+
+void stand_up(struct robot *robot)
+{
+	float tilt_output = pd_loop(robot->tilt_loop);
+
+	float linear_output = pd_loop(robot->linear_loop);
+
+	float spin_output = pd_loop(robot->spin_loop);
+
+	if (robot->has_traction)
+	{
+		set_motor(&robot->left_motor, tilt_output + linear_output - spin_output);
+		set_motor(&robot->right_motor, tilt_output + linear_output + spin_output);
+	}
+	else
+	{
+		set_motor(&robot->left_motor, 0);
+		set_motor(&robot->right_motor, 0);
+	}
+}
+
+void do_robot_tasks(struct robot *robot)
+{
+	struct robot_task *temp, *current;
+
+	if (!robot) return;
+
+	list_for_each_entry_safe(current, temp, &robot->task_list, list_item)
+	{
+		current->task_func(robot);
+	}
 }
 
 float distance_to(float x1, float y1, float x2, float y2)
@@ -143,26 +177,39 @@ void move(struct robot *robot)
 
 	//printf("%f\n", robot->range);
 	//printf("%f\n", robot->turret.tilt);
+
+	float buffer = 450;
+
+	if (robot->dest && robot->is_following )
+	{
+		float to_go = distance_to(robot->position.x_inertial,
+			robot->position.y_inertial, robot->dest->x, robot->dest->y);
+
+		if (to_go < buffer)
+			buffer = to_go + 50;
+	}
+
+
 	if ((robot->range < stopping_distance(robot->linear_velocity,
-					robot->linear_acceleration) + 450 || robot->range <= 300)
+					robot->linear_acceleration) + buffer || robot->range <= 300)
 						 && robot->turret.tilt > -33)
 	{
 		//printf("Too close!\n");
-		if (robot->linear_velocity_setpoint > 0)
-			robot->linear_velocity_setpoint = 0;
+//		if (robot->linear_velocity_setpoint > 0)
+	//		robot->linear_velocity_setpoint = 0;
 	}
 	else
 	{
-		robot->linear_velocity_setpoint = 2;
+	//	robot->linear_velocity_setpoint = 4;
 	}
 
 	if (robot->range < 500)
 	{
-		robot->rotational_velocity_setpoint = .003;
+	//	robot->rotational_velocity_setpoint = .003;
 	}
 	else
 	{
-		robot->rotational_velocity_setpoint = .0;
+	//	robot->rotational_velocity_setpoint = .0;
 	}
 
 	if (robot->rotational_velocity_setpoint > robot->rotational_velocity_max)
@@ -435,7 +482,7 @@ struct string *coord_out(struct variable *var, struct string *string)
 
 	if (!robot->dest)
 	{
-		sprintf(buffer, "none");
+		sprintf(buffer, "none,none");
 	}
 	else
 	{

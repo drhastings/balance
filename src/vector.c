@@ -19,3 +19,52 @@ float dot(struct vect *a, struct vect *b)
 {
 	return a->x * b->x + a->y * b->y + a->z * b->z;
 }
+
+float distance_on_ground(struct vect *a, struct vect *b)
+{
+	struct vect temp_a, temp_b, temp_c;
+
+	temp_a = *a;
+	temp_a.z = 0;
+
+	temp_b = *b;
+	temp_b.z = 0;
+
+	difference(&temp_c, &temp_a, &temp_b);
+
+	return norm(&temp_c);
+}
+
+float angle_on_ground(struct vect *a, struct vect *b)
+{
+	struct vect temp_a, temp_b, temp_c;
+
+	temp_a = *a;
+	temp_a.z = 0;
+
+	temp_b = *b;
+	temp_b.z = 0;
+
+	difference(&temp_c, &temp_a, &temp_b);
+
+	return atan2f(temp_c.x, temp_c.y);
+}
+
+float normalized_angle(float a)
+{
+	while (a > M_PI)
+		a -= 2 * M_PI;
+
+	while (a < -M_PI)
+		a += 2 * M_PI;
+
+	return a;
+}
+
+void difference(struct vect *out, struct vect *a, struct vect *b)
+{
+	out->x = a->x - b->x;
+	out->y = a->y - b->y;
+	out->z = a->z - b->z;
+}
+

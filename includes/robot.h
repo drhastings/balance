@@ -4,6 +4,7 @@
 #include "motor.h"
 #include "quaternion.h"
 #include "position.h"
+#include "list.h"
 #include "../includes/strings.h"
 #include "../includes/variable.h"
 #include "../includes/turret.h"
@@ -19,9 +20,9 @@ struct robot
 
 	struct quaternion orientation;
 
-	int left_count;
+	float left_count;
 
-	int right_count;
+	float right_count;
 
 	struct position position;
 
@@ -78,9 +79,26 @@ struct robot
 	struct turret turret;
 
 	int state;
+
+	struct position2 position2;
+
+	int has_traction;
+
+	struct list_head task_list;
+};
+
+struct robot_task
+{
+	void (*task_func)(struct robot *);
+
+	struct list_head list_item;
 };
 
 void init_robot(struct robot *robot);
+
+void stand_up(struct robot *robot);
+
+void do_robot_tasks(struct robot *robot);
 
 float distance_to(float x1, float y1, float x2, float y2);
 
