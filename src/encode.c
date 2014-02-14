@@ -1,5 +1,5 @@
 /*
- * Copyright © 2013 Tuomas Jormola <tj@solitudo.net> <http://solitudo.net>
+ i Copyright © 2013 Tuomas Jormola <tj@solitudo.net> <http://solitudo.net>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -752,7 +752,7 @@ int encode_loop(CUBE_STATE_T *state, struct robot *robot) {
 				frame_out++;
 			}
 			// Flush buffer to output file
-			//output_written = write(sockfd, ctx.encoder_ppBuffer_out->pBuffer + ctx.encoder_ppBuffer_out->nOffset, ctx.encoder_ppBuffer_out->nFilledLen);
+			//output_written = ctx.encoder_ppBuffer_out->nFilledLen;
 
 			output_written = fwrite(ctx.encoder_ppBuffer_out->pBuffer + ctx.encoder_ppBuffer_out->nOffset, 1, ctx.encoder_ppBuffer_out->nFilledLen, ctx.fd_out);
 

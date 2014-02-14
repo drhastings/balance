@@ -1,6 +1,8 @@
 #include "../includes/robot.h"
 #include "../includes/pd.h"
 #include "../includes/coord.h"
+#include "../includes/vector.h"
+#include "../includes/fly.h"
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,29 +21,29 @@ void init_robot(struct robot *robot)
 
 	robot->encoder_handle = open(ENCODER_FILE, O_RDONLY);
 
-	robot->tilt_target = -0.176;
+	robot->tilt_target = -0.05;
 
-	robot->tilt_loop = new_pd(14, 55, 1, 0, 0, &robot->position2.tilt, &robot->tilt_target); 
+	robot->tilt_loop = new_pd(19, 85, 1, 0, 0, &robot->position2.tilt, &robot->tilt_target); 
 
-	robot->linear_loop = new_pd(0.003, 0.0033, 60, 0, 0, &robot->position2.distance_moved, &robot->linear_target); 
+	robot->linear_loop = new_pd(0.004, 0.0045, 60, 0, 0, &robot->position2.distance_moved, &robot->linear_target); 
 
-	robot->spin_loop = new_pd(.8, 8, 1, 0, 0, &robot->position2.heading, &robot->rotational_target); 
+	robot->spin_loop = new_pd(-.6, -10, 1, 0, 0, &robot->position2.heading, &robot->rotational_target); 
 
 	gpioInitialise();
 
-	robot->left_motor.pin_a = 11;
-	robot->left_motor.pin_b = 9;
-	robot->left_motor.enable = 10;
+	robot->right_motor.pin_a = 9;
+	robot->right_motor.pin_b = 11;
+	robot->right_motor.enable = 10;
 
-	robot->right_motor.pin_a = 7;
-	robot->right_motor.pin_b = 8;
-	robot->right_motor.enable = 25;
+	robot->left_motor.pin_a = 7;
+	robot->left_motor.pin_b = 8;
+	robot->left_motor.enable = 25;
 
 	init_motor(&robot->left_motor);
 	init_motor(&robot->right_motor);
 
-	robot->right_motor.boost = 60;
-	robot->left_motor.boost = 60;
+	robot->right_motor.boost = 0;
+	robot->left_motor.boost = 0;
 
 	robot->left_motor.min = 20;
 	robot->right_motor.min = 20;
@@ -64,13 +66,15 @@ void init_robot(struct robot *robot)
 
 	robot->position.wheel_base = 90;
 
-	robot->linear_seek_const = 0.04;
+	robot->linear_seek_const = 0.001;
 
-	robot->spin_seek_const = 0.012;
+	robot->spin_seek_const = 0.008;
 
 	robot->turret.roll = 1380;
 
 	robot->turret.pitch = 900;
+
+  init_fly(&robot->the_fly);
 
 	INIT_LIST_HEAD(&robot->task_list);
 }
@@ -124,94 +128,133 @@ float angle_to(struct robot *robot, float x1, float y1, float x2, float y2)
 
 	float angle = atan2f(y_diff, x_diff);
 
-	return atan2f(sinf(angle - robot->position.incr_inertial_heading),
-									cosf(angle - robot->position.incr_inertial_heading));
+	return atan2f(sinf(angle - robot->position2.heading),
+									cosf(angle - robot->position2.heading));
+}
+
+void spin(struct robot *robot)
+{
+  static float angle;
+
+  if (robot->has_traction)
+  {
+    angle += .001;
+  }
+  else
+  {
+    angle = 0;
+  }
+}
+
+void stay_away(struct robot *robot)
+{
+  float x_diff = robot->turret.target.x - robot->position2.position.x;
+  float y_diff = robot->turret.target.y - robot->position2.position.y;
+
+  float new_x, new_y;
+  
+  float distance = sqrtf(x_diff * x_diff + y_diff * y_diff);
+
+  if (distance < 700)
+  {
+    float angle = normalized_angle(robot->look_angle);
+
+    new_x = robot->turret.target.x - cosf(angle) * 600;
+    new_y = robot->turret.target.y - sinf(angle) * 600;
+
+    x_diff = new_x - robot->position2.position.x;
+    y_diff = new_y - robot->position2.position.y;
+
+    distance = sqrtf(x_diff * x_diff + y_diff * y_diff);
+
+    if (distance > 20)
+    {
+      robot->dest->x = new_x;
+      robot->dest->y = new_y;
+    }
+  }
+
+  //printf("%f, %f, %f, %f, %f, %f, %f\n", robot->position2.position.x, robot->position2.position.y, robot->turret.target.x, robot->turret.target.y, distance, robot->dest->x, robot->dest->y);
+}
+
+void stay_within(struct robot *robot)
+{
+  float distance = sqrtf(robot->dest->x * robot->dest->x + 
+    robot->dest->y * robot->dest->y);
+
+  if (distance > 500)
+  {
+    robot->dest->x = robot->dest->x / distance;
+    robot->dest->y = robot->dest->y / distance;
+  }
 }
 
 void move(struct robot *robot)
 {
-	if (robot->dest && robot->is_following)
-	{
-		float dist = distance_to(robot->position.x_inertial,
-			robot->position.y_inertial, robot->dest->x, robot->dest->y);
+  float spin_angle = normalized_angle(robot->look_angle -
+    robot->position2.heading);
 
-		//printf("%f\n", dist);
+  static float x_diff, y_diff;
 
-		float clipped_angle = angle_to(robot, robot->position.x_inertial,
-					robot->position.y_inertial, robot->dest->x, robot->dest->y);
+  if (robot->dest)
+  {
+    x_diff = robot->dest->x - robot->position2.position.x;
+    y_diff = robot->dest->y - robot->position2.position.y;
 
-		if(dist > 20)
-		{
-			robot->linear_velocity_setpoint = robot->linear_seek_const * dist *
-				cosf(clipped_angle);
+    float distance = sqrtf((x_diff * x_diff) + (y_diff * y_diff));
 
-			if (robot->linear_velocity_setpoint < 0) robot->linear_velocity_setpoint = 0;
+    if (distance > 100)
+    {
+      static float angle;
 
-			robot->rotational_velocity_setpoint = robot->spin_seek_const * clipped_angle;
+      angle = atan2f(y_diff, x_diff) - robot->position2.heading;
 
-			if (stopping_distance(robot->linear_velocity,
-						robot->linear_acceleration) > dist)
-			{
-				robot->linear_velocity_setpoint = 0;
-			}
+      angle = normalized_angle(angle);
 
-			if (stopping_distance(robot->rotational_velocity,
-						robot->rotational_acceleration) > fabs(clipped_angle))
-			{
-				robot->rotational_velocity_setpoint = 0;
-			}
-		}
-		else
-		{
-			robot->dest = robot->dest->next;
+      float face_towards = normalized_angle(robot->look_angle - atan2f(y_diff, x_diff));
 
-			if (!robot->dest) robot->is_following = 0;
-		}
-	}
-	else
-	{
-		robot->rotational_velocity_setpoint = -robot->in_spin * robot->rotational_velocity_max;
+      if (fabs(face_towards) < M_PI / 2.0)
+      {
+        robot->rotational_velocity_setpoint = robot->spin_seek_const * angle;
+      }
+      else
+      {
+        robot->rotational_velocity_setpoint = -robot->spin_seek_const * angle;
+      }
 
-		robot->linear_velocity_setpoint = robot->in_speed * robot->linear_velocity_max;
-	}
+      if (stopping_distance(robot->rotational_velocity,
+        robot->rotational_acceleration) >= fabs(angle))
+      {
+        robot->rotational_velocity_setpoint = 0;
+      }
 
-	//printf("%f\n", robot->range);
-	//printf("%f\n", robot->turret.tilt);
+      robot->linear_velocity_setpoint = robot->linear_seek_const * distance
+        * cosf(angle);
 
-	float buffer = 450;
+      if (stopping_distance(robot->linear_velocity,
+        robot->linear_acceleration) >= distance)
+      {
+        robot->linear_velocity_setpoint = 0;
+      }
 
-	if (robot->dest && robot->is_following )
-	{
-		float to_go = distance_to(robot->position.x_inertial,
-			robot->position.y_inertial, robot->dest->x, robot->dest->y);
+    }
+    else
+    {
+      robot->rotational_velocity_setpoint = robot->spin_seek_const * spin_angle;
 
-		if (to_go < buffer)
-			buffer = to_go + 50;
-	}
+      if (stopping_distance(robot->rotational_velocity,
+        robot->rotational_acceleration) >= fabs(spin_angle))
+      {
+        robot->rotational_velocity_setpoint = 0;
+      }
 
+      robot->linear_velocity_setpoint = 0;
+    }
+  }
+}
 
-	if ((robot->range < stopping_distance(robot->linear_velocity,
-					robot->linear_acceleration) + buffer || robot->range <= 300)
-						 && robot->turret.tilt > -33)
-	{
-		//printf("Too close!\n");
-//		if (robot->linear_velocity_setpoint > 0)
-	//		robot->linear_velocity_setpoint = 0;
-	}
-	else
-	{
-	//	robot->linear_velocity_setpoint = 4;
-	}
-
-	if (robot->range < 500)
-	{
-	//	robot->rotational_velocity_setpoint = .003;
-	}
-	else
-	{
-	//	robot->rotational_velocity_setpoint = .0;
-	}
-
+void adjust_speeds(struct robot *robot)
+{
 	if (robot->rotational_velocity_setpoint > robot->rotational_velocity_max)
 		robot->rotational_velocity_setpoint = robot->rotational_velocity_max;
 

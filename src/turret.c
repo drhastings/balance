@@ -12,7 +12,7 @@ struct vect camera_center =
 {
 	.x = 0,
 	.y = 240,
-	.z = 90
+	.z = 70
 };
 
 
@@ -163,9 +163,9 @@ int point_at_local(struct turret *turret, struct vect *point)
 		turret->pitch = M_PI / 4;
 	}
 
-	float yaw_setting = turret->yaw * conversion_factor + 340;
+	float yaw_setting = turret->yaw * conversion_factor + 370;
 
-	float pitch_setting = turret->pitch * conversion_factor + 560;
+	float pitch_setting = 1800 - (turret->pitch * conversion_factor);
 
 	gpioServo(24, yaw_setting);
 	gpioServo(4, pitch_setting);
@@ -205,21 +205,55 @@ int point_at_world(struct robot *robot, struct vect *point)
 	return point_at_local(&robot->turret, &local_point);
 }
 
+void follow(struct robot *robot)
+{
+	float conversion_factor = (1000.0 / 90.0) * (180 / M_PI);
+
+ 	if (robot->turret.yaw * conversion_factor > 1960)
+	{
+		robot->turret.yaw = M_PI / 2;
+		robot->turret.pitch = M_PI / 4;
+	}
+	if (robot->turret.yaw * conversion_factor < 160)
+	{
+		robot->turret.yaw = M_PI / 2;
+		robot->turret.pitch = M_PI / 4;
+	}
+	if (robot->turret.pitch * conversion_factor > 1440)
+	{
+		robot->turret.yaw = M_PI / 2;
+		robot->turret.pitch = M_PI / 4;
+	}
+	if (robot->turret.pitch *conversion_factor < 140)
+	{
+		robot->turret.yaw = M_PI / 2;
+		robot->turret.pitch = M_PI / 4;
+	}
+
+	float yaw_setting = robot->turret.yaw * conversion_factor + 340;
+
+	float pitch_setting = robot->turret.pitch * conversion_factor + 560;
+
+	gpioServo(24, yaw_setting);
+	gpioServo(4, pitch_setting); 
+}
+
 void pointer(struct robot *robot)
 {
-	struct vect target;
+  struct vect point;
 
-	static float angle = 0;
+  point.x = 500;
+  point.y = 0;
+  point.z = -40;
 
-	target.x = 500;
-	target.y = 0;
-	target.z = -40;
-
-	point_at_world(robot, &target);
+	point_at_world(robot, &point);
 
 	struct vect output;
 
 	get_up_vector(robot, &output);
+
+  robot->look_angle = atan2f(robot->turret.target.y - robot->position2.position.y,
+    robot->turret.target.x - robot->position2.position.x);
 
 //	printf("%f, %f, %f\n", output.x, output.y, output.z);
 
@@ -240,9 +274,9 @@ void pointer(struct robot *robot)
 
 	cross(&cam_up, &output, &product);
 
-	robot->turret.roll = asinf(product.x / look.x);
+	robot->turret.roll = -asinf(product.x / look.x);
 
 	//printf("%f, %f, %f\n", local.x, local.y, local.z);
-	fprintf(stderr, "%f\n", robot->turret.roll);
+	//fprintf(stderr, "%f\n", robot->turret.roll);
 }
 

@@ -35,6 +35,14 @@ static const GLfloat quadx[4*3] = {
    2.07,  2.07,  0,
 };
 
+static const GLfloat cursorx[4*3] = {
+   /* FRONT */
+   -0.207, -0.207,  0,
+   0.207, -0.207,  0,
+   -0.207,  0.207, 0,
+   0.207,  0.207,  0,
+};
+
 /** Texture coordinates for the quad. */
 static const GLfloat texCoords[4 * 2] = {
    0.f,  0.f,

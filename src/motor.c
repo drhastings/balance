@@ -9,7 +9,7 @@ void init_motor(struct motor *motor)
 	gpioSetMode(motor->pin_b, PI_OUTPUT);
 	gpioSetMode(motor->enable, PI_OUTPUT);
 
-	gpioSetPWMfrequency(motor->enable, 400);
+	gpioSetPWMfrequency(motor->enable, 500);
 
 	gpioSetPWMrange(motor->enable, 1000);
 }

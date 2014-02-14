@@ -7,6 +7,7 @@
 #include "list.h"
 #include "../includes/strings.h"
 #include "../includes/variable.h"
+#include "../includes/fly.h"
 #include "../includes/turret.h"
 
 #define STATE_BALANCE 0
@@ -72,6 +73,8 @@ struct robot
 
 	struct coord *dest;
 
+  float look_angle;
+
 	float spin_seek_const;
 
 	float linear_seek_const;
@@ -85,6 +88,10 @@ struct robot
 	int has_traction;
 
 	struct list_head task_list;
+
+	struct server *server;
+
+  struct fly the_fly;
 };
 
 struct robot_task
@@ -100,11 +107,19 @@ void stand_up(struct robot *robot);
 
 void do_robot_tasks(struct robot *robot);
 
+void stay_away(struct robot *robot);
+
+void stay_within(struct robot *robot);
+
 float distance_to(float x1, float y1, float x2, float y2);
 
 float angle_to(struct robot *robot, float x1, float y1, float x2, float y2);
 
+void spin(struct robot *robot);
+
 void move(struct robot *robot);
+
+void adjust_speeds(struct robot *robot);
 
 int num_waypoints(struct robot *robot);
 

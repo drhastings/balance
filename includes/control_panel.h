@@ -8,6 +8,7 @@
 #include "pd.h"
 #include "motor.h"
 #include "robot.h"
+#include "state.h"
 #include "server.h"
 #include "node.h"
 #include "page.h"
@@ -15,7 +16,7 @@
 #include "variable.h"
 #include "strings.h"
 
-void start_control_panel(struct robot *robot);
+void start_control_panel(struct robot *robot, CUBE_STATE_T *state);
 
 void remote(struct robot *robot);
 

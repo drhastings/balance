@@ -8,7 +8,89 @@
 #include <math.h>
 #include <stdio.h>
 
+#include <cv.h>
+
 static pthread_t thread1;
+
+void *find_circles(void *input)
+{
+  CUBE_STATE_T *state = (CUBE_STATE_T *)input;
+
+  while (1)
+  {
+    pthread_mutex_lock(&state->frame_lock);
+
+    pthread_cond_wait(&state->has_frame, &state->frame_lock);
+	
+	  CvMemStorage* storage = cvCreateMemStorage(0);
+	
+	  CvSize size = cvSize(640, 640);
+	  CvSize half_size = cvSize(320, 320);
+	
+    uint8_t mask[640 * 640];
+
+    uint8_t *u_channel = state->frame + (640 * 640);
+
+    uint8_t *v_channel = u_channel + (320 * 320);
+
+    int x = 0, y = 0;
+
+    for (y = 0; y < 320; y++)
+    {
+      for (x = 0; x < 320; x++)
+      {
+        if ((u_channel[y * 320 + x] >= state->u_min) &&
+             (u_channel[y * 320 + x] <= state->u_max) &&
+              (v_channel[y * 320 + x] >= state->v_min) &&
+                (v_channel[y * 320 + x] <= state->v_max))
+        {
+          mask[(y<<1) * 640 + (x<<1)] = 0xFF;
+          mask[((y<<1) + 1) * 640 + (x<<1)] = 0xFF;
+          mask[(y<<1) * 640 + ((x<<1) + 1)] = 0xFF;
+          mask[((y<<1) + 1) * 640 + ((x<<1) + 1)] = 0xFF;
+        }
+      }
+    }
+
+    fprintf(stderr, "%u, %u\n", u_channel[51360], v_channel[51360]);
+
+	  int depth = IPL_DEPTH_8U;
+	
+	  int channels = 1;
+	
+	  IplImage *frame = cvCreateImageHeader(size, depth, channels);
+	  IplImage *mask_frame = cvCreateImageHeader(size, depth, channels);
+	  IplImage *u_frame = cvCreateImageHeader(half_size, depth, channels);
+	  IplImage *v_frame = cvCreateImageHeader(half_size, depth, channels);
+	
+	  frame->imageData = state->frame;
+	  mask_frame->imageData = mask;
+	  u_frame->imageData = u_channel;
+	  v_frame->imageData = v_channel;
+	
+    IplConvKernel *se21 = cvCreateStructuringElementEx(21, 21, 10, 10, CV_SHAPE_RECT, NULL);
+    IplConvKernel *se11 = cvCreateStructuringElementEx(11, 11, 5, 5, CV_SHAPE_RECT, NULL);
+
+    cvMorphologyEx(mask_frame, mask_frame, NULL, se21, CV_MOP_CLOSE, 1);
+    cvMorphologyEx(mask_frame, mask_frame, NULL, se11, CV_MOP_OPEN, 1);
+
+    cvReleaseStructuringElement(&se21);
+    cvReleaseStructuringElement(&se11);
+
+    cvSmooth(mask_frame, mask_frame, CV_GAUSSIAN, 9, 9, 0, 0);
+
+    //CvSeq *results = cvHoughCircles(frame, storage, CV_HOUGH_GRADIENT, 4,
+    //  frame->width/4, 150, 100, 40, 0);
+
+	  //fprintf(stderr, "I found %i circles.\n", results->total);
+
+    cvSaveImage("/ram/processed.jpg", mask_frame, 0);
+
+    state->need_frame = 1;
+
+    pthread_mutex_unlock(&state->frame_lock);
+  }
+}
 
 void init_ogl(CUBE_STATE_T *state)
 {
@@ -135,6 +217,51 @@ void init_shaders(CUBE_STATE_T *state)
 		"{ \n"
 		" vec4 tex = texture2D(texture, TexCoordOut);\n"
 		" gl_FragColor = tex;\n"
+		"}															\n";
+
+	const GLchar *fQuarterStr = 
+		"precision mediump float; \n"
+		"varying vec2 TexCoordOut;\n"
+		"uniform sampler2D texture;\n"
+		"uniform float invs_size;\n"
+		"void main() \n"
+		"{ \n"
+		" vec4 tex1 = texture2D(texture, TexCoordOut + vec2(1.5, 1.5) * invs_size);\n"
+		" vec4 tex2 = texture2D(texture, TexCoordOut + vec2(1.5, -1.5) * invs_size);\n"
+		" vec4 tex3 = texture2D(texture, TexCoordOut + vec2(-1.5, 1.5) * invs_size);\n"
+		" vec4 tex4 = texture2D(texture, TexCoordOut + vec2(-1.5, -1.5) * invs_size );\n"
+		" gl_FragColor = 0.25 * (tex1 + tex2 + tex3 + tex4);\n"
+		"}															\n";
+
+	const GLchar *fMaskStr = 
+		"precision mediump float; \n"
+		"varying vec2 TexCoordOut;\n"
+		"uniform sampler2D texture;\n"
+		"uniform vec2 target_color;\n"
+		"uniform float max_distance;\n"
+		"const highp mat4 RGBtoYUV = mat4(0.257, 0.504, .098, 0.0625,\n"
+    "   -0.148, -0.291, .439, 0.5,\n"
+    "    0.439, -0.368, -0.071, 0.5,\n"
+    "		0.0, 0.0, 0.0, 1.0);\n"
+		"void main() \n"
+		"{ \n"
+		" vec4 tex = texture2D(texture, TexCoordOut);\n"
+		" tex = tex * RGBtoYUV;\n"
+		" vec2 uv = vec2(tex.g, tex.b);\n"
+		" float dist;\n"
+    " dist = distance(target_color, uv);\n"
+		" if (dist < max_distance)\n"
+		" {\n"
+    "   vec4 d;\n"
+    "   d = vec4(TexCoordOut, vec2(1.0));\n"
+//		"   gl_FragColor = vec4(uv.x, uv.y, dist, max_distance);\n"
+		"   gl_FragColor = vec4(1.0) * d;\n"
+		" }\n"
+		" else\n"
+		" {\n"
+		"   gl_FragColor = vec4(0.0);\n"
+//		"   gl_FragColor = vec4(uv.x, uv.y, dist, max_distance);\n"
+		" }\n"
 		"}															\n";
 
 	const GLchar *fShaderStrY = 
@@ -385,10 +512,128 @@ void init_shaders(CUBE_STATE_T *state)
 		}
 		glDeleteProgram(state->v_program);
 	}
+
+
+  //here down
+  vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vShaderStr, NULL);
+
+
+	glCompileShader(vertexShader);
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	glShaderSource(fragmentShader, 1, &fQuarterStr, NULL);
+
+	glCompileShader(fragmentShader);
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	state->quarter_program = glCreateProgram();
+
+	glAttachShader(state->quarter_program, vertexShader);
+	glAttachShader(state->quarter_program, fragmentShader);
+
+	glBindAttribLocation(state->quarter_program, 0, "vPosition");
+	glBindAttribLocation(state->quarter_program, 1, "TexCoordIn");
+
+	glLinkProgram(state->quarter_program);
+
+	state->quarter_pmatrix = glGetUniformLocation(state->quarter_program, "upmatrix");
+	glGetError();
+	state->quarter_mvmatrix = glGetUniformLocation(state->quarter_program, "umvmatrix");
+	state->invs_size = glGetUniformLocation(state->quarter_program, "inv_size");
+
+	state->quarter_tex = glGetUniformLocation(state->quarter_program, "texture");
+
+	glGetError();
+	glGetProgramiv(state->quarter_program, GL_LINK_STATUS, &linked);
+
+	if(!linked) 
+	{
+		GLint infoLen = 0;
+		glGetProgramiv(state->quarter_program, GL_INFO_LOG_LENGTH, &infoLen);
+
+		if(infoLen > 1)
+		{
+			char* infoLog = malloc(sizeof(char) * infoLen);
+			glGetProgramInfoLog(state->quarter_program, infoLen, NULL, infoLog);
+
+			printf("%s\n", infoLog);
+
+			free(infoLog);
+		}
+		glDeleteProgram(state->quarter_program);
+	}
+
+  //here down
+  vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vShaderStr, NULL);
+
+
+	glCompileShader(vertexShader);
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	glShaderSource(fragmentShader, 1, &fMaskStr, NULL);
+
+	glCompileShader(fragmentShader);
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	state->mask_program = glCreateProgram();
+
+	glAttachShader(state->mask_program, vertexShader);
+	glAttachShader(state->mask_program, fragmentShader);
+
+	glBindAttribLocation(state->mask_program, 0, "vPosition");
+	glBindAttribLocation(state->mask_program, 1, "TexCoordIn");
+
+	glLinkProgram(state->mask_program);
+
+
+	state->mask_pmatrix = glGetUniformLocation(state->mask_program, "upmatrix");
+	glGetError();
+	state->mask_mvmatrix = glGetUniformLocation(state->mask_program, "umvmatrix");
+	state->target_color = glGetUniformLocation(state->mask_program, "target_color");
+	state->max_distance = glGetUniformLocation(state->mask_program, "max_distance");
+
+	state->mask_tex = glGetUniformLocation(state->mask_program, "texture");
+
+	glGetError();
+	glGetProgramiv(state->mask_program, GL_LINK_STATUS, &linked);
+
+	if(!linked) 
+	{
+		GLint infoLen = 0;
+		glGetProgramiv(state->mask_program, GL_INFO_LOG_LENGTH, &infoLen);
+
+		if(infoLen > 1)
+		{
+			char* infoLog = malloc(sizeof(char) * infoLen);
+			glGetProgramInfoLog(state->mask_program, infoLen, NULL, infoLog);
+
+			printf("%s\n", infoLog);
+
+			free(infoLog);
+		}
+		glDeleteProgram(state->mask_program);
+	}
+
 }
 
 void init_framebuffer(CUBE_STATE_T *state)
 {
+  state->need_frame = 1;
+
 	glGenFramebuffers(1, &state->offscreen_renderbuffer);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, state->offscreen_renderbuffer);
@@ -505,6 +750,192 @@ void init_framebuffer(CUBE_STATE_T *state)
 	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
 
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 80, 320);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_512);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_512);
+
+	glGenTextures(1, &state->texture_512);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_512);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 512, 512, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_512, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 512, 512);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_128);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_128);
+
+	glGenTextures(1, &state->texture_128);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_128);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 128, 128, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_128, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 128, 128);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_32);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_32);
+
+	glGenTextures(1, &state->texture_32);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_32);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_32, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 32, 32);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_8);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_8);
+
+	glGenTextures(1, &state->texture_8);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_8);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_8, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 8, 8);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_2);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_2);
+
+	glGenTextures(1, &state->texture_2);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_2);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_2, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 2, 2);
+
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
+
+	status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		printf("incomplete framebuffer %u\n", status);
+	}
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+
+	glGenFramebuffers(1, &state->framebuffer_1);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_1);
+
+	glGenTextures(1, &state->texture_1);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_1);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, state->texture_1, 0);
+
+	glGenRenderbuffers(1, &depthRenderbuffer);
+
+	glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 1, 1);
 
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRenderbuffer);
 
@@ -669,6 +1100,199 @@ void redraw_scene(CUBE_STATE_T *state)
 {
 	// Start with a clear screen
 
+  glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_512);
+
+	glViewport(0, 0, 512, 512);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->mask_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->tex);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->mask_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->mask_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+  GLfloat color[2] = {state->color[0] / 256.0, state->color[1] / 256.0};
+
+	glUniform2f(state->target_color, color[0], color[1]); 
+
+	glUniform1f(state->max_distance, 5 /  256.0); 
+
+	glUniform1i(state->mask_tex, 0);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+  GLubyte output_pixel[4];
+
+	glReadPixels(256, 256, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%u, %u, %u, %u\n", output_pixel[0], output_pixel[1], output_pixel[2], output_pixel[3]);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_128);
+
+	glViewport(0, 0, 128, 128);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->quarter_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_512);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+	glUniform1i(state->quarter_tex, 0);
+	glUniform1f(state->invs_size, 0.0078125);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+	//glReadPixels(64, 64, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+  
+  //fprintf(stderr, "%f, %f, %u, %u\n", (output_pixel[0] - 128) * 2.0, (output_pixel[1] - 128) * 2.0, output_pixel[2], output_pixel[3]);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_32);
+
+	glViewport(0, 0, 32, 32);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->quarter_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_128);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+	glUniform1i(state->quarter_tex, 0);
+	glUniform1f(state->invs_size, 0.03125);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+  //glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%f, %f, %u, %u\n", (output_pixel[0] - 128) * 2.0, (output_pixel[1] - 128) * 2.0, output_pixel[2], output_pixel[3]);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_8);
+
+	glViewport(0, 0, 8, 8);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->quarter_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_32);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+	glUniform1i(state->quarter_tex, 0);
+	glUniform1f(state->invs_size, 0.125);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+  //glReadPixels(4, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%f, %f, %u, %u\n", (output_pixel[0] - 128) * 2.0, (output_pixel[1] - 128) * 2.0, output_pixel[2], output_pixel[3]);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_2);
+
+	glViewport(0, 0, 2, 2);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->quarter_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_8);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+	glUniform1i(state->quarter_tex, 0);
+	glUniform1f(state->invs_size, 0.5);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+ 	//glReadPixels(1, 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%u, %u, %u, %u\n", output_pixel[0], output_pixel[1], output_pixel[2], output_pixel[3]);
+
+ glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_1);
+
+	glViewport(0, 0, 1, 1);
+
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+
+	glUseProgram(state->quarter_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->texture_2);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, quadx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+
+	glUniform1i(state->quarter_tex, 0);
+	glUniform1f(state->invs_size, 1.0);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+	glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  state->x_pos = (float) output_pixel[0] / (float) output_pixel[2];
+  state->y_pos = (float) output_pixel[1] / (float) output_pixel[2];
+
+  if (!isnan(state->x_pos))
+  {
+    //fprintf(stderr, "%f, %f\n", state->x_pos, state->y_pos);
+  }
+
 	glBindFramebuffer(GL_FRAMEBUFFER, state->offscreen_renderbuffer);
 
 	glViewport(0, 0, 640, 640);
@@ -686,8 +1310,8 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glUniformMatrix4fv(state->unif_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
 
-
-	rotate_matrix(&state->mv_matrix, state->roll, 0, 0, 1.0);
+  translate_matrix(&state->mv_matrix, 0, 0, 1);
+	//rotate_matrix(&state->mv_matrix, state->roll, 0, 0, M_PI / 4);
 
 	glUniformMatrix4fv(state->unif_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->mv_matrix.elements); 
 
@@ -696,6 +1320,37 @@ void redraw_scene(CUBE_STATE_T *state)
 	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
 
 	glGetError();
+
+	//glReadPixels(320, 320, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%u, %u\n", output_pixel[1], output_pixel[2]);
+
+	glUseProgram(state->render_program);
+
+	glBindTexture(GL_TEXTURE_2D, state->tex);
+
+	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, cursorx );
+	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, texCoords );
+	glEnableVertexAttribArray(0);
+	glEnableVertexAttribArray(1);
+
+	glUniformMatrix4fv(state->unif_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+
+  translate_matrix(&state->mv_matrix, (state->x_pos - .5) * 4.14, (state->y_pos - .5) * 4.14, .01);
+	//rotate_matrix(&state->mv_matrix, state->roll, 0, 0, M_PI / 4);
+
+	glUniformMatrix4fv(state->unif_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->mv_matrix.elements); 
+
+	glUniform1i(state->unif_tex, 0);
+
+	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
+	glGetError();
+
+	//glReadPixels(320, 320, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+
+  //fprintf(stderr, "%u, %u\n", output_pixel[1], output_pixel[2]);
+
 
 	glBindFramebuffer(GL_FRAMEBUFFER, state->y_framebuffer);
 
@@ -718,8 +1373,10 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glUniform1i(state->y_tex, 0);
 
-	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
-
+  //if (!isnan(state->x_pos))
+  //{
+  	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+  //}
 	glGetError();
 
 	GLubyte output_frame[160 * 640 * 4 + 2 * (80 * 320 * 4)];
@@ -780,24 +1437,38 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glReadPixels(0, 0, 80, 320, GL_RGBA, GL_UNSIGNED_BYTE, state->write_buffer + 512000);
 
-	//	 if (state->dump_frame)
-	//	 fprintf(stderr,"%u, %u\n", output_frame[460960], output_frame[563360]);
+  fprintf(stderr, "%u, %u\n", state->write_buffer[461278], state->write_buffer[564318]);
 
-	/*	 memset(&output_frame[203518], 29, 6);
-			 memset(&output_frame[205758], 29, 6);
-			 memset(&output_frame[206398], 29, 6);
-			 memset(&output_frame[207038], 29, 6);
-			 memset(&output_frame[207678], 29, 6);
-			 memset(&output_frame[208318], 29, 6);
+  if (state->need_frame)
+  {
+    pthread_mutex_lock(&state->frame_lock);
 
-			 memset(&output_frame[460956], 255, 3);
-			 memset(&output_frame[461278], 255, 3);
-			 memset(&output_frame[461598], 255, 3);
+    memcpy(state->frame, state->write_buffer, sizeof(output_frame));
 
-			 memset(&output_frame[563998], 107, 3);
-			 memset(&output_frame[564318], 107, 3);
-			 memset(&output_frame[564638], 107, 3);*/
+    state->need_frame = 0;
 
+    pthread_cond_signal(&state->has_frame);
+
+    pthread_mutex_unlock(&state->frame_lock);
+  }
+
+	/*	 if (!isnan(state->x_pos))
+     {
+		   memset(&state->write_buffer[203518], 29, 6);
+			 memset(&state->write_buffer[205758], 29, 6);
+			 memset(&state->write_buffer[206398], 29, 6);
+			 memset(&state->write_buffer[207038], 29, 6);
+			 memset(&state->write_buffer[207678], 29, 6);
+			 memset(&state->write_buffer[208318], 29, 6);
+
+			 memset(&state->write_buffer[460956], 255, 3);
+			 memset(&state->write_buffer[461278], 255, 3);
+			 memset(&state->write_buffer[461598], 255, 3);
+
+			 memset(&state->write_buffer[563998], 107, 3);
+			 memset(&state->write_buffer[564318], 107, 3);
+			 memset(&state->write_buffer[564638], 107, 3);
+    }*/
 	//	 fwrite(state->write_buffer, 1, sizeof(output_frame), stdout);
 	//		printf("%u, %u, %u, %u\n", output_frame[8], output_frame[9], output_frame[10], output_frame[11]);
 

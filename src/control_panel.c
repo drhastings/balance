@@ -1,4 +1,5 @@
 #include "../includes/control_panel.h"
+#include "../includes/state.h"
 
 struct string *count_out(struct variable *var, struct string *string)
 {
@@ -27,13 +28,13 @@ void remote(struct robot *robot)
 	robot->linear_velocity_setpoint = robot->in_speed * robot->linear_velocity_max;
 }
 
-void start_control_panel(struct robot *robot)
+void start_control_panel(struct robot *robot, CUBE_STATE_T *state)
 {
-	struct server *server = new_server("Robot", 80);
+	robot->server = new_server("Robot", 80);
 
   struct node *node = new_node("html", NULL, NULL);
 
-  struct page *page = new_page("/spin_loop.html", node, server);
+  struct page *page = new_page("/spin_loop.html", node, robot->server);
 
   node = new_node("head", NULL, page->root);
 
@@ -351,13 +352,39 @@ void start_control_panel(struct robot *robot)
 
   new_node("br", NULL, node);
 
+  new_text("U value:", node);
+
+	prop = new_property("value", "10", NULL);
+
+  var = new_variable(page, "u_value", &state->color[0], 4, count_in, count_out);
+	
+	append_to_property(prop, new_property("name", "u_value", NULL));
+
+	prop->value->variable = var;
+
+  new_node("input", prop, node);
+
+	new_text("V value:", node);
+
+	prop = new_property("value", "10", NULL);
+
+  var = new_variable(page, "v_value", &state->color[1], 4, count_in, count_out);
+	
+	append_to_property(prop, new_property("name", "v_value", NULL));
+
+	prop->value->variable = var;
+
+  new_node("input", prop, node);
+
+  new_node("br", NULL, node); 
+
 	prop = new_property("type", "submit", NULL);
 
   new_node("input", prop, node);
 
   node = new_node("html", NULL, NULL);
 
-  page = new_page("/remote.html", node, server);
+  page = new_page("/remote.html", node, robot->server);
 
   node = new_node("head", NULL, page->root);
 
@@ -379,7 +406,7 @@ void start_control_panel(struct robot *robot)
 
   node = new_node("odometry", NULL, NULL);
 
-  page = new_page("/location.html", node, server);
+  page = new_page("/location.html", node, robot->server);
 
   var = new_variable(page, "pos_x", &robot->position2.position.x, 4, count_in, count_out);
 
@@ -469,7 +496,7 @@ void start_control_panel(struct robot *robot)
 
   node = new_node("graphs", NULL, NULL);
 
-  page = new_page("/graph_output.html", node, server);
+  page = new_page("/graph_output.html", node, robot->server);
 
   var = new_variable(page, "tilt", &robot->position.traction_value, 4,
 		count_in, count_out);

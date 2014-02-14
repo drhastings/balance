@@ -171,12 +171,12 @@ void update_position2(struct robot *robot)
 
 	float heading = atan2f(projection.y, projection.x);
 
-//	printf("%f\n", robot->position2.heading);
+//	printf("%f\n", heading);
 
-	robot->position2.tilt = acosf(dot(&robot->position2.gravity, &projection)) -
-		M_PI / 2;
+	robot->position2.tilt = acosf(dot(&projection, &robot->position2.gravity)) -
+    M_PI / 2;
 
-//	printf("%f\n", robot->position2.tilt);
+	//printf("%f\n", robot->position2.tilt);
 
 //	update_wheel_coord_imu(&robot->position2);
 
@@ -190,7 +190,7 @@ void update_position2(struct robot *robot)
 	if (change > M_PI / 8)
 	{
 		change = 0;
-		robot->position2.heading_offset = robot->position2.last_imu_heading;
+		robot->position2.heading_offset = heading;
 	}
 
 //	printf("%f\n", robot->position2.heading);
@@ -207,8 +207,8 @@ void update_position2(struct robot *robot)
 
 //	printf("%f, %f\n", robot->position2.position.x, robot->position2.position.y);
 
-	if (robot->position2.gravity.z > .5 &&
-		fabs(robot->position2.tilt - robot->tilt_target) < .35)
+	if (fabs(robot->position2.tilt - robot->tilt_target) < .35 && 
+       robot->position2.gravity.z > .5)
 	{
 		robot->has_traction = 1;
 	}
@@ -294,7 +294,8 @@ static void update_gravity_vector(struct position2 *pos)
 
 void update_wheel_position(struct position2 *pos)
 {
-	float tilt_encoder_offset = 0;//-sinf(pos->tilt) * (360 / M_PI);
+	float tilt_encoder_offset = 0;//-sinf(pos->tilt) * (720 / M_PI);
+  //printf("%f\n", tilt_encoder_offset);
 
 	float left_movement = pos->left - pos->last_left + tilt_encoder_offset;
 	pos->last_left = pos->left + tilt_encoder_offset;
@@ -304,9 +305,9 @@ void update_wheel_position(struct position2 *pos)
 
 	pos->movement = ((left_movement + right_movement) / 2.0);
 
-//	printf("%f\n", movement);
-
 	pos->distance_moved += pos->movement; 
+
+	//printf("%f\n", pos->tilt);
 
 	pos->movement = pos->movement * 0.349065850398865;
 

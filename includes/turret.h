@@ -20,6 +20,8 @@ struct turret
 	struct quaternion turret_rotation;
 };
 
+void follow(struct robot *robot);
+
 void pointer(struct robot *robot);
 
 int point_at(struct robot *robot, struct vect *point);

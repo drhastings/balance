@@ -4,6 +4,8 @@
 #include "state.h"
 #include "matrix.h"
 
+void *find_circles(void *input);
+
 void init_ogl(CUBE_STATE_T *state);
 
 void init_shaders(CUBE_STATE_T *state);
