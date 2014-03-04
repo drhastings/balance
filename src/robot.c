@@ -3,6 +3,7 @@
 #include "../includes/coord.h"
 #include "../includes/vector.h"
 #include "../includes/fly.h"
+#include "../includes/waypoint.h"
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,13 +22,13 @@ void init_robot(struct robot *robot)
 
 	robot->encoder_handle = open(ENCODER_FILE, O_RDONLY);
 
-	robot->tilt_target = -0.05;
+	robot->position2.tilt_target = -0.11;
 
-	robot->tilt_loop = new_pd(19, 85, 1, 0, 0, &robot->position2.tilt, &robot->tilt_target); 
+	robot->tilt_loop = new_pd(23, 85, 1, 0, 0, &robot->position2.tilt, &robot->position2.tilt_target); 
 
-	robot->linear_loop = new_pd(0.004, 0.0045, 60, 0, 0, &robot->position2.distance_moved, &robot->linear_target); 
+	robot->linear_loop = new_pd(0.004, 0.0060, 60, 0, 0, &robot->position2.distance_moved, &robot->linear_target); 
 
-	robot->spin_loop = new_pd(-.6, -10, 1, 0, 0, &robot->position2.heading, &robot->rotational_target); 
+	robot->spin_loop = new_pd(-.6, -15, 1, 0, 0, &robot->position2.heading, &robot->rotational_target); 
 
 	gpioInitialise();
 
@@ -52,9 +53,9 @@ void init_robot(struct robot *robot)
 
 	robot->linear_velocity_setpoint = 0;
 
-	robot->linear_velocity_max = 8;
+	robot->linear_velocity_max = 5;
 
-	robot->linear_acceleration = 0.02;
+	robot->linear_acceleration = 0.01;
 
 	robot->rotational_velocity = 0;
 
@@ -62,11 +63,11 @@ void init_robot(struct robot *robot)
 
 	robot->rotational_velocity_max = 0.02;
 
-	robot->rotational_acceleration = 0.0004;
+	robot->rotational_acceleration = 0.0001;
 
 	robot->position.wheel_base = 90;
 
-	robot->linear_seek_const = 0.001;
+	robot->linear_seek_const = 0.008;
 
 	robot->spin_seek_const = 0.008;
 
@@ -77,6 +78,8 @@ void init_robot(struct robot *robot)
   init_fly(&robot->the_fly);
 
 	INIT_LIST_HEAD(&robot->task_list);
+
+	INIT_LIST_HEAD(&robot->waypoints);
 }
 
 void stand_up(struct robot *robot)
@@ -196,14 +199,18 @@ void move(struct robot *robot)
 
   static float x_diff, y_diff;
 
-  if (robot->dest)
+  if (!list_empty(&robot->waypoints))
   {
-    x_diff = robot->dest->x - robot->position2.position.x;
-    y_diff = robot->dest->y - robot->position2.position.y;
+    struct waypoint *point = list_entry(robot->waypoints.next, struct waypoint, list_entry);
+
+//    fprintf(stderr, "%f\n", point->point.x);
+
+    x_diff = point->point.x - robot->position2.position.x;
+    y_diff = point->point.y - robot->position2.position.y;
 
     float distance = sqrtf((x_diff * x_diff) + (y_diff * y_diff));
 
-    if (distance > 100)
+    if (distance > 30)
     {
       static float angle;
 
@@ -213,7 +220,7 @@ void move(struct robot *robot)
 
       float face_towards = normalized_angle(robot->look_angle - atan2f(y_diff, x_diff));
 
-      if (fabs(face_towards) < M_PI / 2.0)
+      if (1)//fabs(face_towards) < M_PI / 2.0)
       {
         robot->rotational_velocity_setpoint = robot->spin_seek_const * angle;
       }
@@ -235,21 +242,36 @@ void move(struct robot *robot)
         robot->linear_acceleration) >= distance)
       {
         robot->linear_velocity_setpoint = 0;
+
+        if (robot->linear_velocity_setpoint> 0)
+        {
+          robot->linear_velocity_setpoint - robot->linear_acceleration;
+        }
+        else
+        {
+          robot->linear_velocity_setpoint + robot->linear_acceleration;
+        }
       }
 
     }
     else
     {
-      robot->rotational_velocity_setpoint = robot->spin_seek_const * spin_angle;
+      fprintf(stderr, "I'm here\n");
 
-      if (stopping_distance(robot->rotational_velocity,
-        robot->rotational_acceleration) >= fabs(spin_angle))
-      {
-        robot->rotational_velocity_setpoint = 0;
-      }
-
-      robot->linear_velocity_setpoint = 0;
+      list_del_init(&point->list_entry);
     }
+  }
+  else
+  {
+    robot->rotational_velocity_setpoint = robot->spin_seek_const * spin_angle;
+
+    if (stopping_distance(robot->rotational_velocity,
+      robot->rotational_acceleration) >= fabs(spin_angle))
+    {
+      robot->rotational_velocity_setpoint = 0;
+    }
+
+    robot->linear_velocity_setpoint = 0;
   }
 }
 

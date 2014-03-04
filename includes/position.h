@@ -90,6 +90,7 @@ struct position2
 	float heading_offset;
 
 	float tilt;
+  float tilt_target;
 
 	struct vect position;
 

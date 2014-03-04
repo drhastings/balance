@@ -24,7 +24,7 @@ void get_acceleration(struct fly *fly);
 
 void accelerate(struct fly *fly);
 
-void move_fly(struct fly *fly);
+void move_fly(struct robot *robot, struct fly *fly);
 
 void takeoff(struct fly *fly);
 

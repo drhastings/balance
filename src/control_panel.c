@@ -424,7 +424,7 @@ void start_control_panel(struct robot *robot, CUBE_STATE_T *state)
 
 	text = new_text(",", node);
 
-  var = new_variable(page, "heading", &robot->position.heading, 4, count_in, count_out);
+  var = new_variable(page, "heading", &robot->position2.heading, 4, count_in, count_out);
 
 	text = new_text("0", node);
 

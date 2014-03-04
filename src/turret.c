@@ -11,8 +11,8 @@
 struct vect camera_center =
 {
 	.x = 0,
-	.y = 240,
-	.z = 70
+	.y = -240,
+	.z = -70
 };
 
 
@@ -21,12 +21,14 @@ void world_to_local(struct robot * robot, struct vect *local,
 {
 	struct quaternion backwards;
 
-	world->x -= robot->position2.position.x;
-	world->y -= robot->position2.position.y;
+  struct vect temp = *world;
+
+	temp.x -= robot->position2.position.x;
+	temp.y -= robot->position2.position.y;
 
 	get_conjugate(&backwards, &robot->position2.corrected_orientation);
 
-	rotate_vector(local, world, &backwards);
+	rotate_vector(local, &temp, &backwards);
 }
 
 void local_to_world(struct robot * robot, struct vect *world,
@@ -113,6 +115,7 @@ int point_at_local(struct turret *turret, struct vect *point)
 	difference(&diff, point, &camera_center);
 
 	//printf("%f, %f, %f\n", diff.x, diff.y, diff.z);
+	//printf("%f, %f, %f\n", point->x, point->y, point->z);
 
 	float magnitude = norm(&diff);
 
@@ -131,12 +134,14 @@ int point_at_local(struct turret *turret, struct vect *point)
 
 	float conversion_factor = (1000.0 / 90.0) * (180 / M_PI);
 
-	turret->yaw = (atan2f(-normalized_local.y, normalized_local.x));
+	turret->yaw = (atan2f(normalized_local.y, -normalized_local.x));
 
 	float distance = sqrtf(normalized_local.x * normalized_local.x +
 				normalized_local.y * normalized_local.y);
 
-	turret->pitch = (atan2f(normalized_local.z, distance));
+	turret->pitch = -(atan2f(normalized_local.z, distance));
+
+//  fprintf(stderr, "%f\n", turret->pitch);
 
 	if (turret->yaw * conversion_factor > 1960)
 	{
@@ -163,20 +168,27 @@ int point_at_local(struct turret *turret, struct vect *point)
 		turret->pitch = M_PI / 4;
 	}
 
-	float yaw_setting = turret->yaw * conversion_factor + 370;
+	float yaw_setting = turret->yaw * conversion_factor + 415;
 
-	float pitch_setting = 1800 - (turret->pitch * conversion_factor);
+	float pitch_setting = 2125 - (turret->pitch * conversion_factor);
 
-	gpioServo(24, yaw_setting);
-	gpioServo(4, pitch_setting);
+  if (yaw_setting > 500 && yaw_setting < 2500)
+  {
+  	gpioServo(24, yaw_setting);
+  }
+
+  if (pitch_setting > 500 && pitch_setting < 2500)
+  {
+  	gpioServo(4, pitch_setting);
+  }
 
 	if (can_point)
 	{
-		gpioWrite(14, 1);
+		//gpioWrite(14, 1);
 	}
 	else
 	{
-		gpioWrite(14, 0);
+		//gpioWrite(14, 0);
 	}
 
 	struct quaternion yaw, pitch;
@@ -205,6 +217,102 @@ int point_at_world(struct robot *robot, struct vect *point)
 	return point_at_local(&robot->turret, &local_point);
 }
 
+float get_expected_distance(struct robot *robot)
+{
+  struct vect local_look, look, offset, world_offset, offset_cam, cam_in_world, floor_spot;
+
+  look.x = 0;
+  look.y = 10;
+  look.z = 0;
+
+  offset.x = 0;
+  offset.y = 0;
+  offset.z = 150;
+
+  cam_to_world(robot, &local_look, &look);
+
+  cam_to_world(robot, &world_offset, &offset);
+
+  local_to_world(robot, &cam_in_world, &camera_center);
+
+  offset_cam.x = cam_in_world.x + world_offset.x;
+  offset_cam.y = cam_in_world.y + world_offset.y;
+  offset_cam.z = cam_in_world.z + world_offset.z;
+
+  find_floor_intersection(&floor_spot, &offset_cam, &local_look);
+
+  float xx = (floor_spot.x - cam_in_world.x) * (floor_spot.x - cam_in_world.x);
+  float yy = (floor_spot.y - cam_in_world.y) * (floor_spot.y - cam_in_world.y);
+  float zz = (floor_spot.z - cam_in_world.z) * (floor_spot.z - cam_in_world.z);
+
+  return sqrtf(xx + yy +zz) - 35;
+}
+
+void screen_to_world_vect(struct robot *robot, struct vect *out,
+                            float x, float y)
+{
+  struct vect local_look, look, cam_in_world, floor_spot;
+
+  look.x = 200 * x; 
+  look.y = 1000; 
+  look.z = 200 * y; 
+
+  cam_to_world(robot, &local_look, &look);
+
+  local_to_world(robot, &cam_in_world, &camera_center);
+
+//  fprintf(stderr, "%f, %f, %f\n", local_look.x, local_look.y, local_look.z);
+
+  find_floor_intersection(&floor_spot, &cam_in_world, &local_look);
+
+  *out = floor_spot;
+
+//  fprintf(stderr, "%f, %f, %f\n", out->x, out->y, out->z);
+}
+
+void cam_to_local(struct robot *robot, struct vect *out, struct vect *in)
+{
+  struct vect temp_look, look;
+
+  temp_look = *in;
+
+  look.z = cosf(-robot->turret.roll) * temp_look.z - 
+                  sinf(-robot->turret.roll) * temp_look.x;
+  look.x = sinf(-robot->turret.roll) * temp_look.z + 
+                  cosf(-robot->turret.roll) * temp_look.x;
+
+  look.y = temp_look.y;
+
+  temp_look = look;
+
+  look.y = cosf(-robot->turret.pitch) * temp_look.y - 
+                  sinf(-robot->turret.pitch) * temp_look.z;
+  look.z = sinf(-robot->turret.pitch) * temp_look.y + 
+                  cosf(-robot->turret.pitch) * temp_look.z;
+
+  temp_look = look;
+
+  look.y = cosf(robot->turret.yaw - M_PI / 2) * temp_look.y - 
+                  sinf(robot->turret.yaw - M_PI / 2) * temp_look.x;
+  look.x = sinf(robot->turret.yaw - M_PI / 2) * temp_look.y + 
+                  cosf(robot->turret.yaw - M_PI / 2) * temp_look.x;
+
+//  fprintf(stderr, "%f, %f, %f\n", look.x, look.y, look.z);
+  *out = look;
+}
+
+void cam_to_world(struct robot *robot, struct vect *out, struct vect *in)
+{
+  struct vect temp;
+
+  cam_to_local(robot, &temp, in);
+
+  local_to_world(robot, out, &temp);
+
+  out->x -= robot->position2.position.x;
+  out->y -= robot->position2.position.y;
+}
+
 void follow(struct robot *robot)
 {
 	float conversion_factor = (1000.0 / 90.0) * (180 / M_PI);
@@ -212,7 +320,7 @@ void follow(struct robot *robot)
  	if (robot->turret.yaw * conversion_factor > 1960)
 	{
 		robot->turret.yaw = M_PI / 2;
-		robot->turret.pitch = M_PI / 4;
+		robot->turret.pitch = M_PI / 2;
 	}
 	if (robot->turret.yaw * conversion_factor < 160)
 	{
@@ -242,18 +350,47 @@ void pointer(struct robot *robot)
 {
   struct vect point;
 
-  point.x = 500;
-  point.y = 0;
+  point.x = (cosf(robot->rotational_target + (robot->rotational_velocity * 0)) * 1000) + robot->position2.position.x;
+  point.y = (sinf(robot->rotational_target + (robot->rotational_velocity * 0)) * 1000) + robot->position2.position.y;
   point.z = -40;
 
-	point_at_world(robot, &point);
+  //fprintf(stderr, "%f, %f, %f\n\n", robot->turret.target.x, robot->turret.target.y, robot->turret.target.z);
+
+	point_at_world(robot, &robot->turret.target);
+
+  struct vect cam_in_world;
+
+  local_to_world(robot, &cam_in_world, &camera_center);
+
+//  fprintf(stderr, "%f, %f, %f\n", cam_in_world.x, cam_in_world.y, cam_in_world.z);
+//  fprintf(stderr, "%f, %f\n", robot->position2.position.x, robot->position2.position.y);
+
+  struct vect d;
+
+  difference(&d, &cam_in_world, &point);
+
+  float xx = d.x * d.x;
+
+  float yy = d.y * d.y;
+
+  float zz = d.z * d.z;
+
+  float predicted_distance = sqrtf(xx + yy + zz) - 40;
+
+  //fprintf(stderr, "%f, %f\n", predicted_distance, robot->range);
+
+  if (predicted_distance < robot->range)
+  {
+    gpioWrite(14, 0);
+  }
+   else
+  {
+    gpioWrite(14, 0);
+  }
 
 	struct vect output;
 
 	get_up_vector(robot, &output);
-
-  robot->look_angle = atan2f(robot->turret.target.y - robot->position2.position.y,
-    robot->turret.target.x - robot->position2.position.x);
 
 //	printf("%f, %f, %f\n", output.x, output.y, output.z);
 
@@ -275,6 +412,46 @@ void pointer(struct robot *robot)
 	cross(&cam_up, &output, &product);
 
 	robot->turret.roll = -asinf(product.x / look.x);
+
+  if (robot->turret.pitch > robot->turret.pitch_guess)
+  {
+    robot->turret.pitch_guess += 0.000000174532925;
+ 
+    if (robot->turret.pitch_guess > robot->turret.pitch)
+    {
+      robot->turret.pitch_guess = robot->turret.pitch;
+    }
+  }
+
+  if (robot->turret.pitch < robot->turret.pitch_guess)
+  {
+    robot->turret.pitch_guess -= 0.000000174532925;
+ 
+    if (robot->turret.pitch_guess < robot->turret.pitch)
+    {
+      robot->turret.pitch_guess = robot->turret.pitch;
+    }
+  } 
+
+  if (robot->turret.yaw > robot->turret.yaw_guess)
+  {
+    robot->turret.yaw_guess += 0.000000174532925;
+ 
+    if (robot->turret.yaw_guess > robot->turret.yaw)
+    {
+      robot->turret.yaw_guess = robot->turret.yaw;
+    }
+  }
+
+  if (robot->turret.yaw < robot->turret.yaw_guess)
+  {
+    robot->turret.yaw_guess -= 0.000000174532925;
+ 
+    if (robot->turret.yaw_guess < robot->turret.yaw)
+    {
+      robot->turret.yaw_guess = robot->turret.yaw;
+    }
+  } 
 
 	//printf("%f, %f, %f\n", local.x, local.y, local.z);
 	//fprintf(stderr, "%f\n", robot->turret.roll);

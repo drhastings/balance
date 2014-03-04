@@ -52,7 +52,7 @@ void *find_circles(void *input)
       }
     }
 
-    fprintf(stderr, "%u, %u\n", u_channel[51360], v_channel[51360]);
+    //fprintf(stderr, "%u, %u\n", u_channel[51360], v_channel[51360]);
 
 	  int depth = IPL_DEPTH_8U;
 	
@@ -99,6 +99,10 @@ void init_ogl(CUBE_STATE_T *state)
 	EGLint num_config;
 
 	bcm_host_init();
+
+  state->color[0] = 148;
+
+  state->color[1] = 123;
 
 	static EGL_DISPMANX_WINDOW_T nativewindow;
 
@@ -231,6 +235,19 @@ void init_shaders(CUBE_STATE_T *state)
 		" vec4 tex3 = texture2D(texture, TexCoordOut + vec2(-1.5, 1.5) * invs_size);\n"
 		" vec4 tex4 = texture2D(texture, TexCoordOut + vec2(-1.5, -1.5) * invs_size );\n"
 		" gl_FragColor = 0.25 * (tex1 + tex2 + tex3 + tex4);\n"
+		"}															\n";
+
+	const GLchar *fHalfStr = 
+		"precision mediump float; \n"
+		"varying vec2 TexCoordOut;\n"
+		"uniform sampler2D texture;\n"
+		"void main() \n"
+		"{ \n"
+    " vec4 means = texture2D(texture, TexCoordOut);\n"
+    " vec2 positions;\n"
+    " positions.x = means.r / means.b;\n"
+    " positions.y = means.g / means.b;\n"
+		" gl_FragColor = vec4(positions, vec2(1.0));\n"
 		"}															\n";
 
 	const GLchar *fMaskStr = 
@@ -582,6 +599,60 @@ void init_shaders(CUBE_STATE_T *state)
 
 	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
 
+	glShaderSource(fragmentShader, 1, &fHalfStr, NULL);
+
+	glCompileShader(fragmentShader);
+	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	state->half_program = glCreateProgram();
+
+	glAttachShader(state->half_program, vertexShader);
+	glAttachShader(state->half_program, fragmentShader);
+
+	glBindAttribLocation(state->half_program, 0, "vPosition");
+	glBindAttribLocation(state->half_program, 1, "TexCoordIn");
+
+	glLinkProgram(state->half_program);
+
+	state->half_pmatrix = glGetUniformLocation(state->half_program, "upmatrix");
+	glGetError();
+	state->half_mvmatrix = glGetUniformLocation(state->half_program, "umvmatrix");
+	state->half_tex = glGetUniformLocation(state->half_program, "texture");
+
+	glGetError();
+	glGetProgramiv(state->half_program, GL_LINK_STATUS, &linked);
+
+	if(!linked) 
+	{
+		GLint infoLen = 0;
+		glGetProgramiv(state->half_program, GL_INFO_LOG_LENGTH, &infoLen);
+
+		if(infoLen > 1)
+		{
+			char* infoLog = malloc(sizeof(char) * infoLen);
+			glGetProgramInfoLog(state->half_program, infoLen, NULL, infoLog);
+
+			printf("%s\n", infoLog);
+
+			free(infoLog);
+		}
+		glDeleteProgram(state->half_program);
+	}
+
+  //here down
+  vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, &vShaderStr, NULL);
+
+
+	glCompileShader(vertexShader);
+	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &compiled);
+
+	if (!compiled) printf("It didn't compile\n");
+
+	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
 	glShaderSource(fragmentShader, 1, &fMaskStr, NULL);
 
 	glCompileShader(fragmentShader);
@@ -833,6 +904,8 @@ void init_framebuffer(CUBE_STATE_T *state)
 	glBindTexture(GL_TEXTURE_2D, state->texture_32);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
@@ -864,6 +937,8 @@ void init_framebuffer(CUBE_STATE_T *state)
 	glBindTexture(GL_TEXTURE_2D, state->texture_8);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
@@ -895,6 +970,8 @@ void init_framebuffer(CUBE_STATE_T *state)
 	glBindTexture(GL_TEXTURE_2D, state->texture_2);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
@@ -987,7 +1064,7 @@ void init_textures(CUBE_STATE_T *state)
 	glBindTexture(GL_TEXTURE_2D, state->tex);
 }
 
-void create_perspective_matrix(struct matrix *out, float fovy, float aspect,
+void create_perspective_matrix(struct matrix_4x4 *out, float fovy, float aspect,
 		float zn, float zf)
 {
 	identity(out);
@@ -1009,7 +1086,7 @@ void create_perspective_matrix(struct matrix *out, float fovy, float aspect,
 	out->elements[3][3] = 0;
 }
 
-void rotate_matrix(struct matrix *mat, float angle, float x, float y, float z)
+void rotate_matrix(struct matrix_4x4 *mat, float angle, float x, float y, float z)
 {
 	float s, c;
 
@@ -1018,7 +1095,7 @@ void rotate_matrix(struct matrix *mat, float angle, float x, float y, float z)
 	s = sinf(angle);
 	c = cosf(angle);
 
-	struct matrix rotator, temp;
+	struct matrix_4x4 rotator, temp;
 
 	memcpy(&temp, mat, sizeof(temp)); 
 
@@ -1044,12 +1121,12 @@ void rotate_matrix(struct matrix *mat, float angle, float x, float y, float z)
 	rotator.elements[2][3] = 0.0;
 	rotator.elements[3][3] = 1.0;
 
-	mat_mult(mat, &rotator, &temp);
+	mat_mult_4x4(mat, &rotator, &temp);
 }
 
-void translate_matrix(struct matrix *mat, float x, float y, float z)
+void translate_matrix(struct matrix_4x4 *mat, float x, float y, float z)
 {
-	struct matrix translator, temp;
+	struct matrix_4x4 translator, temp;
 
 	memcpy(&temp, mat, sizeof(temp));
 
@@ -1073,10 +1150,10 @@ void translate_matrix(struct matrix *mat, float x, float y, float z)
 	translator.elements[2][3] = 0.0;
 	translator.elements[3][3] = 1.0;
 
-	mat_mult(mat, &translator, &temp);
+	mat_mult_4x4(mat, &translator, &temp);
 }
 
-void identity(struct matrix *mat)
+void identity(struct matrix_4x4 *mat)
 {
 	int i, j;
 
@@ -1095,6 +1172,14 @@ void identity(struct matrix *mat)
 		}
 	}
 }
+
+struct pix
+{
+  uint8_t x_moment;
+  uint8_t y_moment;
+  uint8_t moment;
+  uint8_t id;
+};
 
 void redraw_scene(CUBE_STATE_T *state)
 {
@@ -1119,11 +1204,15 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glUniformMatrix4fv(state->mask_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
 
+//  state->color[0] = 150;
+
+//  state->color[1] = 120;
+
   GLfloat color[2] = {state->color[0] / 256.0, state->color[1] / 256.0};
 
 	glUniform2f(state->target_color, color[0], color[1]); 
 
-	glUniform1f(state->max_distance, 5 /  256.0); 
+	glUniform1f(state->max_distance, 10 /  256.0); 
 
 	glUniform1i(state->mask_tex, 0);
 
@@ -1133,7 +1222,7 @@ void redraw_scene(CUBE_STATE_T *state)
 
   GLubyte output_pixel[4];
 
-	glReadPixels(256, 256, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+//	glReadPixels(256, 256, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
 
   //fprintf(stderr, "%u, %u, %u, %u\n", output_pixel[0], output_pixel[1], output_pixel[2], output_pixel[3]);
 
@@ -1193,10 +1282,36 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glGetError();
 
-  //glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
+  struct pix zones[32 * 32];
+
+  glReadPixels(0, 0, 32, 32, GL_RGBA, GL_UNSIGNED_BYTE, zones);
+
+  int32_t i, j, x_moment = 0, y_moment = 0, moment = 0;
+
+  for (i = 0; i < 1024; i++)
+  {
+    x_moment += zones[i].x_moment;
+    y_moment += zones[i].y_moment;
+    moment += zones[i].moment;
+  }
+
+  float x_pos;
+  float y_pos;
+
+  if (moment > 800)
+  {
+    x_pos = x_moment / (float) moment;
+    y_pos = y_moment / (float) moment;
+    state->x_pos = x_pos;
+    state->y_pos = y_pos;
+    state->set_target = 1;
+  }
+
+//  fprintf(stderr, "%i, %i, %i\n", x_moment, y_moment, moment);
+//  fprintf(stderr, "%f, %f\n", x_pos, y_pos);
 
   //fprintf(stderr, "%f, %f, %u, %u\n", (output_pixel[0] - 128) * 2.0, (output_pixel[1] - 128) * 2.0, output_pixel[2], output_pixel[3]);
-
+/*
   glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer_8);
 
 	glViewport(0, 0, 8, 8);
@@ -1263,7 +1378,7 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 
-	glUseProgram(state->quarter_program);
+	glUseProgram(state->half_program);
 
 	glBindTexture(GL_TEXTURE_2D, state->texture_2);
 
@@ -1272,12 +1387,11 @@ void redraw_scene(CUBE_STATE_T *state)
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
 
-	glUniformMatrix4fv(state->quarter_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
+	glUniformMatrix4fv(state->half_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
 
-	glUniformMatrix4fv(state->quarter_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
+	glUniformMatrix4fv(state->half_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->send_mv_matrix.elements); 
 
-	glUniform1i(state->quarter_tex, 0);
-	glUniform1f(state->invs_size, 1.0);
+	glUniform1i(state->half_tex, 0);
 
 	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
 
@@ -1285,14 +1399,21 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, output_pixel);
 
-  state->x_pos = (float) output_pixel[0] / (float) output_pixel[2];
-  state->y_pos = (float) output_pixel[1] / (float) output_pixel[2];
+  float x_pos = (float) output_pixel[0] / 256.0;
+  float y_pos = (float) output_pixel[1] / 256.0;
 
-  if (!isnan(state->x_pos))
+  fprintf(stderr, "%i, %i, %i\n", output_pixel[0], output_pixel[1], output_pixel[2]);
+
+  if (!isnan(x_pos) && !isnan(y_pos) && !(x_pos == 0 && y_pos == 0))
   {
     //fprintf(stderr, "%f, %f\n", state->x_pos, state->y_pos);
-  }
+    state->set_target++;
 
+    state->x_pos = x_pos;
+
+    state->y_pos = y_pos;
+  }
+*/
 	glBindFramebuffer(GL_FRAMEBUFFER, state->offscreen_renderbuffer);
 
 	glViewport(0, 0, 640, 640);
@@ -1311,7 +1432,7 @@ void redraw_scene(CUBE_STATE_T *state)
 	glUniformMatrix4fv(state->unif_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
 
   translate_matrix(&state->mv_matrix, 0, 0, 1);
-	//rotate_matrix(&state->mv_matrix, state->roll, 0, 0, M_PI / 4);
+	rotate_matrix(&state->mv_matrix, state->roll, 0, 0, M_PI / 4.0);
 
 	glUniformMatrix4fv(state->unif_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->mv_matrix.elements); 
 
@@ -1336,14 +1457,17 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glUniformMatrix4fv(state->unif_pmatrix, 1, GL_FALSE, (GLfloat *)&state->p_matrix.elements); 
 
-  translate_matrix(&state->mv_matrix, (state->x_pos - .5) * 4.14, (state->y_pos - .5) * 4.14, .01);
+  translate_matrix(&state->mv_matrix, (x_pos - .5) * 4.14, (y_pos - .5) * 4.14, .01);
 	//rotate_matrix(&state->mv_matrix, state->roll, 0, 0, M_PI / 4);
 
 	glUniformMatrix4fv(state->unif_mvmatrix, 1, GL_FALSE, (GLfloat *)&state->mv_matrix.elements); 
 
 	glUniform1i(state->unif_tex, 0);
 
-	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+  if (!isnan(x_pos))
+  {
+//  	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+  }
 
 	glGetError();
 
@@ -1373,10 +1497,8 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glUniform1i(state->y_tex, 0);
 
-  //if (!isnan(state->x_pos))
-  //{
-  	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
-  //}
+ 	glDrawArrays( GL_TRIANGLE_STRIP, 0, 4);
+
 	glGetError();
 
 	GLubyte output_frame[160 * 640 * 4 + 2 * (80 * 320 * 4)];
@@ -1437,7 +1559,7 @@ void redraw_scene(CUBE_STATE_T *state)
 
 	glReadPixels(0, 0, 80, 320, GL_RGBA, GL_UNSIGNED_BYTE, state->write_buffer + 512000);
 
-  fprintf(stderr, "%u, %u\n", state->write_buffer[461278], state->write_buffer[564318]);
+//  fprintf(stderr, "%u, %u\n", state->write_buffer[461278], state->write_buffer[564318]);
 
   if (state->need_frame)
   {

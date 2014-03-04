@@ -13,6 +13,7 @@
 #include "includes/quaternion.h"
 #include "includes/state.h"
 #include "includes/surface.h"
+#include "includes/waypoint.h"
 #include "includes/ogl.h"
 #include "includes/matrix.h"
 #include "includes/position.h"
@@ -93,7 +94,7 @@ void *render_task(void *dummy)
   return NULL;
 }
 
-void dump_matrix(struct matrix *mat)
+void dump_matrix(struct matrix_4x4 *mat)
 {
   printf("%f, %f, %f, %f\n", mat->elements[0][0], mat->elements[1][0],mat->elements[2][0],mat->elements[3][0]);
   printf("%f, %f, %f, %f\n", mat->elements[0][1], mat->elements[1][1],mat->elements[2][1],mat->elements[3][1]);
@@ -174,12 +175,11 @@ int main(int argc, char** argv)
 
   point_task = (struct robot_task *)malloc(sizeof(*point_task));
 
-  robot.turret.target.x = -10000;
-  robot.turret.target.y = 10000;
+  robot.turret.target.x = 500;
+  robot.turret.target.y = 0;
   robot.turret.target.z = 0;
 
-  point_task->task_func = &follow;
-  
+  point_task->task_func = &pointer;
 
   remote_task = (struct robot_task *)malloc(sizeof(*remote_task));
 
@@ -196,6 +196,16 @@ int main(int argc, char** argv)
   move_task = (struct robot_task *)malloc(sizeof(*move_task));
 
   move_task->task_func = &move;
+
+  struct waypoint the_point;
+
+  the_point.point.x = 1000;
+  the_point.point.y = 0;
+  the_point.point.z = -40;
+
+  INIT_LIST_HEAD(&the_point.list_entry);
+
+//  list_add(&the_point.list_entry, &robot.waypoints);
 
   adjust_task = (struct robot_task *)malloc(sizeof(*adjust_task));
 
@@ -221,14 +231,44 @@ int main(int argc, char** argv)
   list_add_tail(&remote_task->list_item, &robot.task_list);
 //  list_add_tail(&avoid_task->list_item, &robot.task_list);
 //  list_add_tail(&stay_task->list_item, &robot.task_list);
-//  list_add_tail(&move_task->list_item, &robot.task_list);
+  list_add_tail(&move_task->list_item, &robot.task_list);
   list_add_tail(&adjust_task->list_item, &robot.task_list);
   list_add_tail(&stand_up_task->list_item, &robot.task_list);
 
   get_sensor_data(&robot.position2, robot.sensor_data);
 
   init_position(&robot.position2);
-  
+
+ //Variables for Kalman filter
+  struct matrix_2x2 A, B, H, Q, R, current_prob_estimate;
+
+  float current_state_estimate[2];
+
+  current_state_estimate[0] = 0;
+  current_state_estimate[1] = 0;
+
+  A.elements[0][0] = 1;
+  A.elements[0][1] = 0;
+  A.elements[1][0] = 0;
+  A.elements[1][1] = 1;
+
+  Q.elements[0][0] = 0.01;
+  Q.elements[0][1] = 0;
+  Q.elements[1][0] = 0;
+  Q.elements[1][1] = 0.01;
+
+  R.elements[0][0] = 0.4;
+  R.elements[0][1] = 0;
+  R.elements[1][0] = 0;
+  R.elements[1][1] = 0.4;
+
+  current_prob_estimate.elements[0][0] = 1;
+  current_prob_estimate.elements[0][1] = 0;
+  current_prob_estimate.elements[1][0] = 0;
+  current_prob_estimate.elements[1][1] = 1;
+
+  static int look_wait = 0;
+
   while(1)
   {
     read(robot.encoder_handle, robot.sensor_data, sizeof(robot.sensor_data));
@@ -246,23 +286,143 @@ int main(int argc, char** argv)
 
     state.roll = robot.turret.roll * 180 / M_PI;
 
-    if (state.x_pos < .5)
+    static struct vect sightings[3];
+
+    int has_dest = list_empty(&robot.waypoints);
+
+    int is_spinning = list_empty(&fly_task->list_item);
+
+//    fprintf(stderr, "%i, %i\n", has_dest, is_spinning);
+
+//Prediction Step
+    float predicted_state_estimate[2];
+
+    mat_mult_2xv(predicted_state_estimate, &A, current_state_estimate);
+
+    struct matrix_2x2 predicted_prob_estimate;
+
+    mat_add_2x2(&predicted_prob_estimate, & current_prob_estimate, &Q);
+
+    if (!isnan(state.x_pos) && state.set_target >= 1)
     {
-      robot.turret.yaw += 0.001;
-    }
-    if (state.x_pos > .5)
-    {
-      robot.turret.yaw -= 0.001;
-    }
-    if (state.y_pos < .5)
-    {
-      robot.turret.pitch += 0.001;
-    } 
-    if (state.y_pos > .5)
-    {
-      robot.turret.pitch -= 0.001;
-    }  
+      float x_in_vid = (state.x_pos - .5) * -2;
+      float y_in_vid = (state.y_pos - .5) * -2;
+
+// Get obervation.
+      screen_to_world_vect(&robot, &sightings[0], x_in_vid, y_in_vid);
+
+      float observation[2];
+
+      observation[0] = sightings[0].x;
+      observation[1] = sightings[0].y;
+
+      float innovation[2];
+
+      innovation[0] = observation[0] - predicted_state_estimate[0];
+      innovation[1] = observation[1] - predicted_state_estimate[1];
+
+      float innovation_magnitude = sqrtf((innovation[0] * innovation[0]) + (innovation [1] * innovation[1]));
+
+      //fprintf(stderr, "%f, %f, %f, %f, %f, %f, %f, %f\n", innovation_magnitude, robot.turret.yaw, robot.turret.pitch,  x_in_vid, y_in_vid, sightings[0].x, sightings[0].y, sightings[0].z);
+
+      struct matrix_2x2 innovation_covariance;
+
+      mat_add_2x2(&innovation_covariance, &predicted_prob_estimate, &R);
+
+// Update
+
+      struct matrix_2x2 kalman_gain, inv_innovation_covariance;
   
+      mat_inverse_2x2(&inv_innovation_covariance, &innovation_covariance);
+
+      mat_mult_2x2(&kalman_gain, &predicted_prob_estimate, &inv_innovation_covariance);
+
+      float step[2];
+
+      mat_mult_2xv(step, &kalman_gain, innovation);
+
+      current_state_estimate[0] = step[0] + predicted_state_estimate[0];
+      current_state_estimate[1] = step[1] + predicted_state_estimate[1];
+
+      struct matrix_2x2 intermediate;
+
+      intermediate.elements[0][0] = 1 - kalman_gain.elements[0][0];
+      intermediate.elements[0][1] = 0 - kalman_gain.elements[0][1];
+      intermediate.elements[1][0] = 0 - kalman_gain.elements[1][0];
+      intermediate.elements[1][1] = 1 - kalman_gain.elements[1][1];
+
+      mat_mult_2x2(&current_prob_estimate, &intermediate, &predicted_prob_estimate);
+
+      //fprintf(stderr, "%f, %f\n", current_state_estimate[0], current_state_estimate[1]);
+
+      if (innovation_magnitude < 800)
+      {
+        look_wait = 300;
+
+        list_del_init(&fly_task->list_item);
+
+        if (innovation_magnitude < 100)
+        {
+          if (list_empty(&robot.waypoints))
+          {
+            list_add(&the_point.list_entry, &robot.waypoints);
+          }
+
+          robot.turret.target.x = current_state_estimate[0];
+          robot.turret.target.y = current_state_estimate[1];
+          robot.turret.target.z = -40;
+
+          the_point.point.x = current_state_estimate[0];
+          the_point.point.y = current_state_estimate[1];
+          the_point.point.z = -40; 
+          //fprintf(stderr, "time to stop spinning\n");
+        }
+
+        //fprintf(stderr, "%f, %f, %f\n", current_state_estimate[0], current_state_estimate[1], innovation_magnitude);
+      }     
+
+/*      if (fabs(state.x_pos) > .25 || fabs(state.y_pos) > .25)
+      {
+        robot.turret.target = temp;
+        the_point.point = temp;
+      }
+      else
+      {
+        the_point.point = temp;
+      }
+
+      if (list_empty(&robot.waypoints))
+      {
+        list_del_init(&fly_task->list_item);  
+
+        list_add_tail(&the_point.list_entry, &robot.waypoints);
+      }*/
+
+//      fprintf(stderr, "%f, %f\n", state.x_pos, state.y_pos);
+//      fprintf(stderr, "%f, %f, %f\n", temp.x, temp.y, temp.z);
+      state.set_target = 0;
+    }
+
+    if (look_wait > 0)
+    {
+      look_wait--;
+    }
+
+    if (list_empty(&robot.waypoints) && list_empty(&fly_task->list_item) && look_wait == 0)
+    {
+      list_add_tail(&fly_task->list_item, &robot.task_list);
+//      fprintf(stderr, "I should spin\n");
+    }
+//    fprintf(stderr, "%i, %i\n", robot.position2.left, robot.position2.right);
+
+    float distance = get_expected_distance(&robot);
+
+//    fprintf(stderr, "%f, %f\n", distance, robot.range);
+//    fprintf(stderr, "%f, %f, %f\n", robot.turret.target.x, robot.turret.target.y, robot.turret.target.z);
+ //   screen_to_world_vect(&robot, &robot.turret.target, 0, 0);
+
+//    fprintf(stderr, "%f, %f, %f\n", robot.turret.target.x, robot.turret.target.y, robot.turret.target.z);
+
     struct timeval now, then;
 
 //    printf("%f, %f, %f, %f, %f, %f\n", robot.position2.position.x, robot.position2.position.y, robot.turret.target.x, robot.turret.target.y, robot.dest->x, robot.dest->y);
@@ -277,6 +437,8 @@ int main(int argc, char** argv)
     //printf("%f\n", robot.range);
 
     //printf("%f, %f, %f\n", robot.position2.position.x, robot.position2.position.y, robot.position2.tilt);
+
+
 
 //    fprintf(stderr, "%f, %f, %f, %i, %i\n", robot.position2.position.x, robot.position2.position.y, robot.position2.heading, robot.position2.left, robot.position2.right);
   }

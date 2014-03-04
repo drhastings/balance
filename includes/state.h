@@ -35,6 +35,7 @@ typedef struct
 	 GLuint framebuffer_1;
 	 GLuint render_program;
 	 GLuint quarter_program;
+	 GLuint half_program;
 	 GLuint mask_program;
 	 GLuint y_program;
 	 GLuint u_program;
@@ -45,11 +46,13 @@ typedef struct
 	 GLuint unif_tex;
 	 GLuint mask_tex;
 	 GLuint quarter_tex;
+	 GLuint half_tex;
 	 GLuint y_tex;
 	 GLuint u_tex;
 	 GLuint v_tex;
 	 GLuint unif_pmatrix;
 	 GLuint quarter_pmatrix;
+	 GLuint half_pmatrix;
 	 GLuint mask_pmatrix;
 	 GLuint y_pmatrix;
 	 GLuint u_pmatrix;
@@ -57,6 +60,7 @@ typedef struct
 	 GLuint unif_mvmatrix;
 	 GLuint mask_mvmatrix;
 	 GLuint quarter_mvmatrix;
+	 GLuint half_mvmatrix;
 	 GLuint y_mvmatrix;
 	 GLuint u_mvmatrix;
 	 GLuint v_mvmatrix;
@@ -77,9 +81,9 @@ typedef struct
 
 	 GLuint dump_frame;
 
-	 struct matrix p_matrix;
-	 struct matrix mv_matrix;
-	 struct matrix send_mv_matrix;
+	 struct matrix_4x4 p_matrix;
+	 struct matrix_4x4 mv_matrix;
+	 struct matrix_4x4 send_mv_matrix;
 
 	 char *write_buffer;
 
@@ -96,6 +100,7 @@ typedef struct
 
    uint8_t frame[160 * 640 * 4 + 2 * (80 * 320 * 4)];
 
+   int set_target;
 } CUBE_STATE_T;
 
 #endif

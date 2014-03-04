@@ -1,6 +1,18 @@
 #include "../includes/vector.h"
 #include <math.h>
 
+void find_floor_intersection(struct vect *out, struct vect *point,
+                              struct vect * slope)
+{
+  float t;
+
+  t = (point->z + 40) / -slope->z;
+
+  out->x = slope->x * t + point->x;
+  out->y = slope->y * t + point->y;
+
+  out->z = -40;
+}
 void cross(struct vect *a, struct vect *b, struct vect * ab)
 {
 	ab->x = a->y * b->z - a->z * b->y;

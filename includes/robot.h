@@ -71,7 +71,11 @@ struct robot
 
 	float is_following;
 
+  int got_command;
+
 	struct coord *dest;
+
+  struct list_head waypoints;
 
   float look_angle;
 
@@ -92,6 +96,8 @@ struct robot
 	struct server *server;
 
   struct fly the_fly;
+
+  int set_target;
 };
 
 struct robot_task

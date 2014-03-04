@@ -10,6 +10,9 @@ struct vect
 	float z;
 };
 
+void find_floor_intersection(struct vect *out, struct vect *point,
+                              struct vect * slope);
+
 void cross(struct vect *a, struct vect *b, struct vect * ab);
 
 float norm(struct vect *a);

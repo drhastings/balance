@@ -14,14 +14,14 @@ void init_framebuffer(CUBE_STATE_T *state);
 
 void init_textures(CUBE_STATE_T *state);
 
-void create_perspective_matrix(struct matrix *out, float fovy, float aspect,
+void create_perspective_matrix(struct matrix_4x4 *out, float fovy, float aspect,
 							float zn, float zf);
 
-void rotate_matrix(struct matrix *mat, float angle, float x, float y, float z);
+void rotate_matrix(struct matrix_4x4 *mat, float angle, float x, float y, float z);
 
-void translate_matrix(struct matrix *mat, float x, float y, float z);
+void translate_matrix(struct matrix_4x4 *mat, float x, float y, float z);
 
-void identity(struct matrix *mat);
+void identity(struct matrix_4x4 *mat);
 
 void redraw_scene(CUBE_STATE_T *state);
 

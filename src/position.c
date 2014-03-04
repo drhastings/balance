@@ -214,7 +214,7 @@ void update_position2(struct robot *robot)
 	}
 	else
 	{
-		robot->position2.heading_offset = robot->position2.last_imu_heading;
+		robot->position2.heading_offset = M_PI + robot->position2.last_imu_heading;
 
 		robot->position2.position.x = 0;
 		robot->position2.position.y = 0;
@@ -294,8 +294,8 @@ static void update_gravity_vector(struct position2 *pos)
 
 void update_wheel_position(struct position2 *pos)
 {
-	float tilt_encoder_offset = 0;//-sinf(pos->tilt) * (720 / M_PI);
-  //printf("%f\n", tilt_encoder_offset);
+	float tilt_encoder_offset = 0;//-sinf(pos->tilt - pos->tilt_target) * (360 / M_PI);
+  //fprintf(stderr, "%f\n", tilt_encoder_offset);
 
 	float left_movement = pos->left - pos->last_left + tilt_encoder_offset;
 	pos->last_left = pos->left + tilt_encoder_offset;
@@ -307,7 +307,7 @@ void update_wheel_position(struct position2 *pos)
 
 	pos->distance_moved += pos->movement; 
 
-	//printf("%f\n", pos->tilt);
+	//fprintf(stderr, "%f\n", pos->tilt - pos->tilt_target);
 
 	pos->movement = pos->movement * 0.349065850398865;
 

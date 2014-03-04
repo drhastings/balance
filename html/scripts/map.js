@@ -151,7 +151,7 @@ function send_data()
 	if (x == 0 && y == 0) follow = "";
 
 	var message = spin.concat(x, speed, y, follow);
-	xmlhttp.send(message); 
+//	xmlhttp.send(message); 
 }
 
 function send_timeout()
@@ -355,20 +355,6 @@ map.prototype.draw = function()
 
 	context.stroke();
 
-	context.beginPath();
-
-	context.moveTo((this.canvas.width / 2) - (this.inertial_y_hist[0] / 10), (this.canvas.height / 2) - (this.inertial_x_hist[0] / 10));
-
-	for (x = 0; x < this.inertial_x_hist.length; x++)
-	{
-		context.lineTo((this.canvas.width / 2) - (this.inertial_y_hist[x + 1] / 10), (this.canvas.height / 2) - (this.inertial_x_hist[x + 1] / 10));
-	}	
-
-	context.lineTo((this.canvas.width / 2) - (this.inertial_y / 10), (this.canvas.height / 2) - (this.inertial_x / 10));
-
-	context.strokeStyle = "#FF3300";
-
-	context.stroke();
 
 	for (x = 0; x < this.waypoint_x.length; x++)
 	{
@@ -755,6 +741,20 @@ node.style.textAlign = "middle";
 
 document.body.appendChild(clear_button);
 
+clear_button.style.position = "absolute";
+clear_button.style.textAlign = "center";
+clear_button.style.right = "110px";
+clear_button.style.bottom = "270px";
+clear_button.style.width = "40px";
+clear_button.style.height = "40px";
+clear_button.style.background = "#ccc";
+clear_button.style.zIndex = 2;
+
+var loop_button = document.createElement("div");
+
+node = loop_button.appendChild(document.createElement("span"));
+
+node.innerHTML = "loop";
 clear_button.style.position = "absolute";
 clear_button.style.textAlign = "center";
 clear_button.style.right = "110px";
